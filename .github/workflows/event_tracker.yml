@@ -24,7 +24,7 @@ jobs:
       # Optional: paste a Discord role ID here later, like <@&123456789012345678>
       ROLE_MENTION: ""
       # Change to false if you only want posts when events are found.
-      POST_NO_EVENT_MESSAGE: "true"
+      POST_NO_EVENT_MESSAGE: "false"
       # Optional: add manual events as JSON through a repository variable/secret if a website blocks scraping.
       MANUAL_EVENTS_JSON: ${{ vars.MANUAL_EVENTS_JSON }}
 
