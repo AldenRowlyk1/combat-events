@@ -431,15 +431,6 @@ def collect_events() -> List[Event]:
 
     all_events.extend(parse_manual_events())
     
-    all_events.append(Event(
-        title="TEST EVENT - ERAU Combat Robotics",
-        date_text="Jun 1, 2026",
-        location="Daytona Beach, FL",
-        url="https://example.com",
-        source="Test",
-        classes="Antweight, Beetleweight, 30 lb",
-        registration="OPEN",
-    ))
     kept = []
     seen = set()
     for event in all_events:
