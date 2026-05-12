@@ -1,0 +1,42 @@
+name: Combat Robotics Event Tracker
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Runs daily at 9:00 AM Eastern during daylight time = 13:00 UTC.
+    # GitHub schedules use UTC.
+    - cron: "0 13 * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  check-events:
+    runs-on: ubuntu-latest
+
+    env:
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      RADIUS_MILES: "450"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python packages
+        run: pip install -r requirements.txt
+
+      - name: Run event tracker
+        run: python event_tracker.py
+
+      - name: Save posted-event history
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add posted_events.json latest_events.json
+          git commit -m "Update combat robotics event history" || echo "No changes to commit"
+          git push
