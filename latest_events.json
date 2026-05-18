@@ -1,1 +1,26 @@
-[]
+[
+  {
+    "title": "RCCR @ STEAMfest 2026",
+    "date_text": "Oct 24, 2026 - Oct 24, 2026",
+    "location": "Huntsville, AL",
+    "url": "https://www.buildersdb.com/events?show=all",
+    "source": "BuildersDB",
+    "major": false,
+    "distance_miles": 422.1012939897979,
+    "classes": "Ant, Beetle, 3 lb, 1 lb",
+    "registration": "Likely open, check page",
+    "event_id": "4f48bded0c66cb84"
+  },
+  {
+    "title": "RCCR @ McWane Science Center",
+    "date_text": "Apr 10, 2027 - Apr 10, 2027",
+    "location": "McWane Science Center Birmingham, AL",
+    "url": "https://www.buildersdb.com/events?show=all",
+    "source": "BuildersDB",
+    "major": false,
+    "distance_miles": 422.1012939897979,
+    "classes": "Ant, Beetle, 3 lb, 1 lb",
+    "registration": "Likely open, check page",
+    "event_id": "0349cae03f9abec9"
+  }
+]
