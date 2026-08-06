@@ -16,7 +16,7 @@ jobs:
 
     env:
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-      RADIUS_MILES: "450"
+      RADIUS_MILES: "999"
       MAJOR_EVENT_RADIUS_MILES: "1100"
       HOME_NAME: "ERAU Daytona Beach"
       HOME_LAT: "29.1900"
