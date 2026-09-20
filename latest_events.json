@@ -46,5 +46,17 @@
     "classes": "Ant, Beetle, 3 lb, 1 lb",
     "registration": "Likely open, check page",
     "event_id": "0349cae03f9abec9"
+  },
+  {
+    "title": "Hickory Bot Battles 2027",
+    "date_text": "Sep 17, 2027 - Sep 18, 2027",
+    "location": "Hickory, NC",
+    "url": "https://www.buildersdb.com/events?show=all",
+    "source": "BuildersDB",
+    "major": false,
+    "distance_miles": 446.4431589798573,
+    "classes": "Fairy, Ant, Beetle, Plastic, 3 lb, 1 lb",
+    "registration": "Likely open, check page",
+    "event_id": "b31bbecc5a7b2fe2"
   }
 ]
