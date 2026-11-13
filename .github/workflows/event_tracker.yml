@@ -3,8 +3,6 @@ name: Combat Robotics Event Tracker
 on:
   workflow_dispatch:
   schedule:
-    # Runs daily at 9:00 AM Eastern during daylight time = 13:00 UTC.
-    # GitHub schedules use UTC.
     - cron: "0 13 * * *"
 
 permissions:
@@ -13,40 +11,30 @@ permissions:
 jobs:
   check-events:
     runs-on: ubuntu-latest
-
     env:
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-      RADIUS_MILES: "9999"
+      RADIUS_MILES: "450"
       MAJOR_EVENT_RADIUS_MILES: "1100"
-      HOME_NAME: "ERAU Daytona Beach"
-      HOME_LAT: "29.1900"
-      HOME_LON: "-81.0480"
-      # Optional: paste a Discord role ID here later, like <@&123456789012345678>
-      ROLE_MENTION: ""
-      # Change to false if you only want posts when events are found.
       POST_NO_EVENT_MESSAGE: "false"
-      # Optional: add manual events as JSON through a repository variable/secret if a website blocks scraping.
-      MANUAL_EVENTS_JSON: ${{ vars.MANUAL_EVENTS_JSON }}
+      FORCE_SUMMARY: "false"
+      ROLE_MENTION: ""
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
-
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.11"
-
       - name: Install Python packages
         run: pip install -r requirements.txt
-
       - name: Run event tracker
         run: python event_tracker.py
-
-      - name: Save posted-event history
+      - name: Save tracking history and source health
         run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git add posted_events.json latest_events.json
-          git commit -m "Update combat robotics event history" || echo "No changes to commit"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tracker_state.json latest_events.json source_status.json
+          git diff --cached --quiet && exit 0
+          git commit -m "Update event tracker history and source health"
           git push
