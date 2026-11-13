@@ -1,0 +1,43 @@
+[
+  {
+    "title": "Robot Renegades Kickoff 2027",
+    "date": "2027-01-16",
+    "location": "Fort Pierce, FL",
+    "url": "https://www.robotcombatevents.com/events/9101",
+    "classes": "1 lb Antweight, Plastic Ant, 3 lb Beetleweight",
+    "registration": "Registration opens Dec 12, 2026"
+  },
+  {
+    "title": "Valentine's MECH Massacre at the Maker Collective",
+    "date": "2027-02-13",
+    "location": "Ocala, FL",
+    "url": "https://www.robotcombatevents.com/event_map",
+    "classes": "1 lb Antweight, Plastic Ant",
+    "registration": "Registration opens Jan 2, 2027"
+  },
+  {
+    "title": "The DropKick Dojo Presents: Hearts and Havoc",
+    "date": "2027-02-20",
+    "location": "Jacksonville, FL",
+    "url": "https://www.robotcombatevents.com/event_map",
+    "classes": "1 lb Antweight, Plastic Ant, 3 lb Beetleweight; other classes may be offered",
+    "registration": "Check event page"
+  },
+  {
+    "title": "Robot Renegades at Central Florida Fair 2027",
+    "date": "2027-03-13",
+    "location": "Orlando, FL",
+    "url": "https://www.robotcombatevents.com/events/7946",
+    "classes": "150 g Fairyweight, 1 lb Antweight, Plastic Ant, 3 lb Beetleweight",
+    "registration": "Registration opens Jan 9, 2027"
+  },
+  {
+    "title": "NHRL Pro World Championship - The Finals",
+    "date": "2026-12-05",
+    "location": "Norwalk, CT",
+    "url": "https://www.nhrl.io/events",
+    "classes": "Check NHRL event page",
+    "registration": "Check NHRL event page",
+    "major": true
+  }
+]
