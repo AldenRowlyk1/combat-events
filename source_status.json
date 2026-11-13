@@ -1,0 +1,43 @@
+{
+  "checked_at": "2026-11-13T23:51:59.191539+00:00",
+  "sources": [
+    {
+      "name": "Robot Combat Events",
+      "url": "https://www.robotcombatevents.com/",
+      "parsed": 0,
+      "status": "zero detected"
+    },
+    {
+      "name": "Robot Combat Events (map)",
+      "url": "https://www.robotcombatevents.com/event_map",
+      "parsed": 0,
+      "status": "zero detected"
+    },
+    {
+      "name": "BuildersDB",
+      "url": "https://www.buildersdb.com/events?show=all",
+      "parsed": 4,
+      "status": "ok"
+    },
+    {
+      "name": "NHRL",
+      "url": "https://www.nhrl.io/events",
+      "parsed": 0,
+      "status": "zero detected"
+    },
+    {
+      "name": "Robot Ruckus",
+      "url": "https://www.robotruckus.org/",
+      "parsed": 1,
+      "status": "ok"
+    }
+  ],
+  "skipped": {
+    "old": 1,
+    "unknown_date": 0,
+    "unknown_location": 1,
+    "out_of_radius": 2
+  },
+  "eligible": 6,
+  "notifications": 6
+}

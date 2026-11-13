@@ -1,26 +1,74 @@
 [
   {
-    "title": "RCCR @ McWane Science Center",
-    "date_text": "Apr 10, 2027 - Apr 10, 2027",
-    "location": "McWane Science Center Birmingham, AL",
-    "url": "https://www.buildersdb.com/events?show=all",
+    "title": "UNC Charlotte Casual Lobbies - Beginners and New Bots Charlotte, North Caro",
+    "date": "2026-11-15",
+    "location": "Charlotte, NC",
+    "url": "https://www.buildersdb.com/events/1550",
     "source": "BuildersDB",
+    "classes": "1 lb, Antweight, Plastic Ant",
+    "registration": "Check event page",
     "major": false,
-    "distance_miles": 422.1012939897979,
-    "classes": "Ant, Beetle, 3 lb, 1 lb",
-    "registration": "Likely open, check page",
-    "event_id": "0349cae03f9abec9"
+    "distance_miles": 417.3,
+    "event_id": "5f1921757ab4ef0e"
   },
   {
-    "title": "Hickory Bot Battles 2027",
-    "date_text": "Sep 17, 2027 - Sep 18, 2027",
-    "location": "Hickory, NC",
-    "url": "https://www.buildersdb.com/events?show=all",
-    "source": "BuildersDB",
+    "title": "NHRL Pro World Championship - The Finals",
+    "date": "2026-12-05",
+    "location": "Norwalk, CT",
+    "url": "https://www.nhrl.io/events",
+    "source": "Curated",
+    "classes": "Check NHRL event page",
+    "registration": "Check NHRL event page",
+    "major": true,
+    "distance_miles": 929.3,
+    "event_id": "62ca41b7461dde4b"
+  },
+  {
+    "title": "Robot Renegades Kickoff 2027",
+    "date": "2027-01-16",
+    "location": "Fort Pierce, FL",
+    "url": "https://www.robotcombatevents.com/events/9101",
+    "source": "Curated",
+    "classes": "1 lb Antweight, Plastic Ant, 3 lb Beetleweight",
+    "registration": "Registration opens Dec 12, 2026",
     "major": false,
-    "distance_miles": 446.4431589798573,
-    "classes": "Fairy, Ant, Beetle, Plastic, 3 lb, 1 lb",
-    "registration": "Likely open, check page",
-    "event_id": "b31bbecc5a7b2fe2"
+    "distance_miles": 128.2,
+    "event_id": "39c015cecb1d05f7"
+  },
+  {
+    "title": "Valentine's MECH Massacre at the Maker Collective",
+    "date": "2027-02-13",
+    "location": "Ocala, FL",
+    "url": "https://www.robotcombatevents.com/event_map",
+    "source": "Curated",
+    "classes": "1 lb Antweight, Plastic Ant",
+    "registration": "Registration opens Jan 2, 2027",
+    "major": false,
+    "distance_miles": 65.9,
+    "event_id": "249147c724f8206c"
+  },
+  {
+    "title": "The DropKick Dojo Presents: Hearts and Havoc",
+    "date": "2027-02-20",
+    "location": "Jacksonville, FL",
+    "url": "https://www.robotcombatevents.com/event_map",
+    "source": "Curated",
+    "classes": "1 lb Antweight, Plastic Ant, 3 lb Beetleweight; other classes may be offered",
+    "registration": "Check event page",
+    "major": false,
+    "distance_miles": 86.9,
+    "event_id": "d2a99e01646efaaf"
+  },
+  {
+    "title": "Robot Renegades at Central Florida Fair 2027",
+    "date": "2027-03-13",
+    "location": "Orlando, FL",
+    "url": "https://www.robotcombatevents.com/events/7946",
+    "source": "Curated",
+    "classes": "150 g Fairyweight, 1 lb Antweight, Plastic Ant, 3 lb Beetleweight",
+    "registration": "Registration opens Jan 9, 2027",
+    "major": false,
+    "distance_miles": 49.3,
+    "event_id": "5da88f507fdd1c3e"
   }
 ]
