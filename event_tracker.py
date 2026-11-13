@@ -32,8 +32,7 @@ STATUS_PATH = Path('source_status.json')
 TODAY = datetime.now(ZoneInfo('America/New_York')).date()
 
 SOURCES = [
-    ('Robot Combat Events', 'https://www.robotcombatevents.com/', 'rce', False),
-    ('Robot Combat Events (map)', 'https://www.robotcombatevents.com/event_map', 'rce', False),
+    ('Robot Combat Events', 'https://www.robotcombatevents.com/events/', 'rce', False),
     ('BuildersDB', 'https://www.buildersdb.com/events?show=all', 'buildersdb', False),
     ('NHRL', 'https://www.nhrl.io/events', 'nhrl', True),
     ('Robot Ruckus', 'https://www.robotruckus.org/', 'ruckus', True),
@@ -192,34 +191,73 @@ def parse_jsonld_events(soup, source, major=False):
 
 
 def parse_rce(html, base):
+    """Parse event-list cards and structured metadata from the public RCE event list.
+
+    This handles server-rendered HTML only. A 200 response with no event markup
+    is reported as zero detected rather than being mislabeled as 'no events'.
+    """
     soup = BeautifulSoup(html, 'html.parser')
-    result = parse_jsonld_events(soup, 'Robot Combat Events')
-    for a in soup.select('a[href]'):
-        href = a.get('href','')
-        if not re.search(r'/events?/\d+(?:\b|/|\?)', href):
+    found = parse_jsonld_events(soup, 'Robot Combat Events')
+    seen_urls = {ev.url.rstrip('/') for ev in found if ev.url}
+
+    # The event list includes links of the form /events/12345. The text on the
+    # event card, not necessarily on the link itself, contains date and venue.
+    for link in soup.select('a[href]'):
+        href = link.get('href', '')
+        if not re.search(r'/events/\d+(?:/|\?|$)', href):
             continue
-        title = a.get_text(' ', strip=True)
-        node = a
-        event_text = ''
-        for _ in range(5):
-            if not node.parent: break
-            node = node.parent
-            candidate = node.get_text(' ', strip=True)
-            if len(candidate) > 2000: break
-            if find_date(candidate) and location_from(candidate):
-                event_text = candidate
+        url = urljoin(base, href)
+        if url.rstrip('/') in seen_urls:
+            continue
+
+        title = link.get_text(' ', strip=True)
+        if not title or len(title) > 180:
+            continue
+
+        card = link
+        for _ in range(7):
+            card = card.parent
+            if not card:
                 break
-        if not event_text:
-            continue
-        if not title or len(title)>140:
-            day_match = DATE_REGEX.search(event_text)
-            title = event_text[:day_match.start()].strip() if day_match else ''
-        if not title or len(title)>180: continue
-        day = find_date(event_text)
-        loc = location_from(event_text)
-        classes, reg = details_from(event_text)
-        result.append(Event(title,day,loc,urljoin(base,href),'Robot Combat Events',classes,reg))
-    return result
+            text = card.get_text(' ', strip=True)
+            if len(text) > 2500:
+                break
+            day = find_date(text)
+            loc = location_from(text)
+            if not day or not loc:
+                continue
+            # Never treat a generic navigation link as an event title.
+            classes, registration = details_from(text)
+            found.append(Event(title, day, loc, url, 'Robot Combat Events', classes, registration))
+            seen_urls.add(url.rstrip('/'))
+            break
+
+    return found
+
+
+def get_rce_events(session):
+    """Try both official listing views, logging access and parsing separately."""
+    urls = [
+        'https://www.robotcombatevents.com/events/',
+        'https://www.robotcombatevents.com/event_map',
+    ]
+    diagnostics = []
+    for url in urls:
+        try:
+            html = fetch(session, url)
+            events = parse_rce(html, url)
+            diagnostics.append(f'{url}: HTTP 200; extracted {len(events)} events')
+            if events:
+                return events, 'ok', '; '.join(diagnostics)
+        except requests.HTTPError as exc:
+            status = exc.response.status_code if exc.response is not None else 'unknown'
+            diagnostics.append(f'{url}: HTTP {status}')
+        except requests.RequestException as exc:
+            diagnostics.append(f'{url}: request error ({type(exc).__name__})')
+        except Exception as exc:
+            diagnostics.append(f'{url}: parser error ({type(exc).__name__}: {str(exc)[:90]})')
+    status = 'blocked/unavailable' if diagnostics and all('HTTP 403' in x or 'HTTP 429' in x for x in diagnostics) else 'zero detected'
+    return [], status, '; '.join(diagnostics)
 
 
 def parse_nhrl(html, base):
@@ -310,9 +348,17 @@ def collect():
     sources=[]
     raw=[]
     for name,url,kind,major in SOURCES:
+        if kind == 'rce':
+            found, status, diagnostic = get_rce_events(session)
+            sources.append({'name': name, 'url': url, 'parsed': len(found),
+                            'status': status, 'detail': diagnostic})
+            print(f'[SOURCE] {name}: {len(found)} events extracted ({status})')
+            print(f'[SOURCE DETAIL] {diagnostic}')
+            raw.extend(found)
+            continue
         try:
             html=fetch(session,url)
-            fn={'rce':lambda:parse_rce(html,url), 'buildersdb':lambda:parse_buildersdb(html),
+            fn={'buildersdb':lambda:parse_buildersdb(html),
                 'nhrl':lambda:parse_nhrl(html,url),'ruckus':lambda:parse_ruckus(html,url)}[kind]
             found=fn()
             sources.append({'name':name,'url':url,'parsed':len(found),'status':'ok' if found else 'zero detected'})
@@ -385,7 +431,7 @@ def main():
         send({'username':'Combat Event Tracker','content':message[:1900]})
         state['last_summary']=local_date
 
-    problems=[s for s in sources if s['status']=='error' or
+    problems=[s for s in sources if s['status'] in ('error', 'blocked/unavailable') or
               (s['status']=='zero detected' and s['name'].startswith(('Robot Combat Events','BuildersDB')))]
     # Warn in Discord once per 7 days when a core source fails, not on every run.
     last_warn=parse_day(state.get('last_warning',''))
