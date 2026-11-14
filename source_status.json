@@ -1,39 +1,43 @@
 {
-  "checked_at": "2026-11-14T01:15:43.071935+00:00",
+  "checked_at": "2026-11-14T01:23:33.001797+00:00",
   "sources": [
     {
       "name": "Robot Combat Events",
       "url": "https://www.robotcombatevents.com/events/",
       "parsed": 16,
       "status": "ok",
-      "detail": "https://www.robotcombatevents.com/events/: HTTP 200; extracted 16 events"
+      "detail": "HTTP 200; 16 parsed from https://www.robotcombatevents.com/events/"
     },
     {
       "name": "BuildersDB",
       "url": "https://www.buildersdb.com/events?show=all",
-      "parsed": 4,
-      "status": "ok"
+      "parsed": 3,
+      "status": "ok",
+      "detail": "HTTP 200; 3 parsed from https://www.buildersdb.com/events?show=all"
     },
     {
       "name": "NHRL",
       "url": "https://www.nhrl.io/events",
       "parsed": 0,
-      "status": "zero detected"
+      "status": "zero detected",
+      "detail": "HTTP 200; 0 parsed from https://www.nhrl.io/events"
     },
     {
       "name": "Robot Ruckus",
       "url": "https://www.robotruckus.org/",
-      "parsed": 1,
-      "status": "ok"
+      "parsed": 0,
+      "status": "zero detected",
+      "detail": "HTTP 200; 0 parsed from https://www.robotruckus.org/"
     }
   ],
   "skipped": {
-    "old": 1,
-    "unknown_date": 0,
-    "unknown_location": 6,
-    "out_of_radius": 13
+    "old": 0,
+    "bad_date": 0,
+    "bad_location": 0,
+    "unresolved_location": 0,
+    "out_of_radius": 18
   },
   "eligible": 6,
   "notifications": 0,
-  "geocode_cache_size": 12
+  "geocoded_cities": 15
 }
