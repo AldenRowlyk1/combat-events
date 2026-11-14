@@ -1,11 +1,28 @@
 
-"""ERAU Combat Robotics Event Tracker.
+"""ERAU ASME Combat Robotics Event Tracker.
 
-Daily event discovery, Discord notifications, weekly summaries,
-duplicate prevention, and source diagnostics.
+Automatically discovers upcoming combat robotics competitions,
+filters by distance from Embry-Riddle Daytona Beach, and sends
+Discord notifications.
 
-Dependencies: requests, beautifulsoup4, python-dateutil
-Store DISCORD_WEBHOOK_URL in GitHub Actions secrets.
+Features:
+- Robot Combat Events, BuildersDB, NHRL, Robot Ruckus
+- Manually curated events
+- Automatic US city geocoding
+- Persistent location caching
+- Cross-source event deduplication
+- Duplicate notification prevention
+- Registration update notifications
+- Weekly Discord summaries
+- Source health diagnostics
+
+Dependencies:
+    requests
+    beautifulsoup4
+    python-dateutil
+
+Required GitHub Actions secret:
+    DISCORD_WEBHOOK_URL
 """
 
 import hashlib
@@ -16,8 +33,9 @@ import re
 
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
+from difflib import SequenceMatcher
 from pathlib import Path
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 from zoneinfo import ZoneInfo
 
 import requests
@@ -29,29 +47,46 @@ from dateutil import parser as dtparser
 # CONFIGURATION
 # ============================================================
 
+HOME_NAME = "ERAU Daytona Beach"
 HOME_LAT = 29.1900
 HOME_LON = -81.0480
 
-RADIUS_MILES = float(os.getenv("RADIUS_MILES", "450"))
+RADIUS_MILES = float(
+    os.getenv("RADIUS_MILES", "450")
+)
+
 MAJOR_RADIUS_MILES = float(
     os.getenv("MAJOR_EVENT_RADIUS_MILES", "1100")
 )
 
-WEBHOOK = os.getenv("DISCORD_WEBHOOK_URL", "")
-ROLE_MENTION = os.getenv("ROLE_MENTION", "").strip()
+WEBHOOK = os.getenv(
+    "DISCORD_WEBHOOK_URL", ""
+)
+
+ROLE_MENTION = os.getenv(
+    "ROLE_MENTION", ""
+).strip()
 
 POST_NO_EVENT_MESSAGE = (
-    os.getenv("POST_NO_EVENT_MESSAGE", "false").lower() == "true"
+    os.getenv(
+        "POST_NO_EVENT_MESSAGE", "false"
+    ).lower() == "true"
 )
 
 FORCE_SUMMARY = (
-    os.getenv("FORCE_SUMMARY", "false").lower() == "true"
+    os.getenv(
+        "FORCE_SUMMARY", "false"
+    ).lower() == "true"
 )
+
+MAX_GEOCODE_REQUESTS = 12
+MAX_NOTIFICATIONS = 10
 
 STATE_PATH = Path("tracker_state.json")
 OLD_STATE_PATH = Path("posted_events.json")
 SNAPSHOT_PATH = Path("latest_events.json")
 STATUS_PATH = Path("source_status.json")
+CURATED_PATH = Path("curated_events.json")
 
 TODAY = datetime.now(
     ZoneInfo("America/New_York")
@@ -59,7 +94,7 @@ TODAY = datetime.now(
 
 
 # ============================================================
-# EVENT SOURCES
+# SOURCES
 # ============================================================
 
 SOURCES = [
@@ -89,14 +124,48 @@ SOURCES = [
     ),
 ]
 
+SOURCE_PRIORITY = {
+    "Robot Combat Events": 5,
+    "BuildersDB": 4,
+    "NHRL": 4,
+    "Robot Ruckus": 4,
+    "Curated": 2,
+}
+
 
 # ============================================================
-# LOCATION DATABASE
+# US STATES
 # ============================================================
 
-# Coordinates are used for straight-line distance calculations.
-# Unknown cities are skipped rather than assigned an
-# incorrect location or distance.
+US_STATES = dict(zip(
+    (
+        "AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA "
+        "KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ "
+        "NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT "
+        "VA WA WV WI WY"
+    ).split(),
+    (
+        "Alabama|Alaska|Arizona|Arkansas|California|"
+        "Colorado|Connecticut|Delaware|Florida|Georgia|"
+        "Hawaii|Idaho|Illinois|Indiana|Iowa|Kansas|"
+        "Kentucky|Louisiana|Maine|Maryland|Massachusetts|"
+        "Michigan|Minnesota|Mississippi|Missouri|Montana|"
+        "Nebraska|Nevada|New Hampshire|New Jersey|"
+        "New Mexico|New York|North Carolina|North Dakota|"
+        "Ohio|Oklahoma|Oregon|Pennsylvania|Rhode Island|"
+        "South Carolina|South Dakota|Tennessee|Texas|"
+        "Utah|Vermont|Virginia|Washington|West Virginia|"
+        "Wisconsin|Wyoming"
+    ).split("|")
+))
+
+
+# ============================================================
+# KNOWN CITY COORDINATES
+# ============================================================
+
+# These cities do not require an API request.
+# Other US cities are looked up automatically.
 
 CITIES = {
     "daytona beach, fl": (29.2108, -81.0228),
@@ -144,15 +213,10 @@ CITIES = {
     "south norwalk, ct": (41.0959, -73.4176),
 }
 
-STATE_NAMES = {
-    "Florida": "FL",
-    "Georgia": "GA",
-    "Alabama": "AL",
-    "South Carolina": "SC",
-    "North Carolina": "NC",
-    "Tennessee": "TN",
-    "Connecticut": "CT",
-}
+
+# ============================================================
+# REGULAR EXPRESSIONS
+# ============================================================
 
 MONTH = (
     r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|"
@@ -162,21 +226,24 @@ MONTH = (
 )
 
 DATE_REGEX = re.compile(
-    rf"\b(?:{MONTH})\s+\d{{1,2}}"
+    rf"\b{MONTH}\s+\d{{1,2}}"
     rf"(?:,?\s+20\d{{2}})?|"
     rf"\b20\d{{2}}-\d{{2}}-\d{{2}}",
     re.I,
 )
 
 LOCATION_REGEX = re.compile(
-    r"([A-Z][A-Za-z .'-]{1,60}),\s*"
-    r"(FL|GA|SC|NC|AL|TN|CT|NJ|PA|VA|KY|MS|LA)\b",
-    re.I,
-)
-
-REG_REGEX = re.compile(
-    r"(Registration\s+(?:closed|open|"
-    r"opens\s+(?:\w+\s+){1,3}\d{1,2},?\s+20\d{2}))",
+    r"([A-Za-z][A-Za-z .'-]{1,65}),\s*"
+    r"([A-Z]{2}|"
+    + "|".join(
+        re.escape(s)
+        for s in sorted(
+            US_STATES.values(),
+            key=len,
+            reverse=True,
+        )
+    )
+    + r")\b",
     re.I,
 )
 
@@ -189,9 +256,16 @@ WEIGHTS_REGEX = re.compile(
     re.I,
 )
 
+REG_REGEX = re.compile(
+    r"Registration\s+"
+    r"(?:closed|open|opens?\s+(?:on\s+)?"
+    r"[A-Za-z]+\s+\d{1,2},?\s+20\d{2})",
+    re.I,
+)
+
 
 # ============================================================
-# EVENT DATA MODEL
+# EVENT MODEL
 # ============================================================
 
 @dataclass
@@ -209,6 +283,7 @@ class Event:
 
     @property
     def event_id(self):
+        # Preserve compatibility with earlier tracker IDs.
         canonical = (
             self.source.lower(),
             self.url.rstrip("/"),
@@ -222,7 +297,237 @@ class Event:
 
 
 # ============================================================
-# DISTANCE CALCULATION
+# DATE UTILITIES
+# ============================================================
+
+def parse_day(value):
+    if not value:
+        return None
+
+    try:
+        return dtparser.parse(
+            str(value),
+            fuzzy=True,
+            default=datetime(TODAY.year, 1, 1),
+        ).date()
+
+    except (
+        ValueError,
+        TypeError,
+        OverflowError,
+    ):
+        return None
+
+
+def find_date(text):
+    match = DATE_REGEX.search(text)
+
+    if not match:
+        return None
+
+    snippet = match.group(0)
+
+    if not re.search(r"20\d{2}", snippet):
+        nearby = text[
+            match.start():match.start() + 110
+        ]
+
+        year = re.search(
+            r"20\d{2}",
+            nearby,
+        )
+
+        if not year:
+            return None
+
+        snippet += ", " + year.group(0)
+
+    day = parse_day(snippet)
+
+    return day.isoformat() if day else None
+
+
+# ============================================================
+# LOCATION NORMALIZATION
+# ============================================================
+
+def normalize_location(location):
+    text = re.sub(
+        r"\s+",
+        " ",
+        str(location),
+    ).strip()
+
+    text = re.sub(
+        r",?\s*(?:United States|USA|US)\s*$",
+        "",
+        text,
+        flags=re.I,
+    ).strip(" ,")
+
+    match = re.fullmatch(
+        r"([A-Za-z][A-Za-z .'-]+),\s*"
+        r"([A-Za-z ]+)",
+        text,
+        re.I,
+    )
+
+    if not match:
+        return None
+
+    city = match.group(1).strip()
+    region = match.group(2).strip()
+
+    if len(region) == 2:
+        state = region.upper()
+
+    else:
+        state = next(
+            (
+                code
+                for code, name in US_STATES.items()
+                if name.casefold()
+                == region.casefold()
+            ),
+            None,
+        )
+
+    if state not in US_STATES:
+        return None
+
+    return f"{city.title()}, {state}"
+
+
+def location_from(text):
+    matches = list(
+        LOCATION_REGEX.finditer(text)
+    )
+
+    if not matches:
+        return ""
+
+    # Accept the last location inside this event's own text.
+    # The caller must not supply text containing other events.
+    location = normalize_location(
+        matches[-1].group(0)
+    )
+
+    return location or ""
+
+
+# ============================================================
+# AUTOMATIC CITY GEOCODING
+# ============================================================
+
+def coordinates_for(location, state, session):
+    key = location.casefold()
+
+    if key in CITIES:
+        return CITIES[key]
+
+    cache = state.setdefault(
+        "geocode_cache",
+        {},
+    )
+
+    if key in cache:
+        coords = cache[key]
+        return tuple(coords) if coords else None
+
+    attempted = state.setdefault(
+        "_geocode_attempted",
+        [],
+    )
+
+    if key in attempted:
+        return None
+
+    if len(attempted) >= MAX_GEOCODE_REQUESTS:
+        print(
+            f"[GEO] Limit reached: {location}"
+        )
+        return None
+
+    attempted.append(key)
+
+    city, region = location.rsplit(
+        ", ",
+        1,
+    )
+
+    try:
+        response = session.get(
+            "https://geocoding-api.open-meteo.com/v1/search",
+            params={
+                "name": city,
+                "count": 30,
+                "language": "en",
+                "countryCode": "US",
+            },
+            timeout=15,
+        )
+
+        response.raise_for_status()
+
+        results = response.json().get(
+            "results",
+            [],
+        )
+
+        matches = [
+            item
+            for item in results
+            if (
+                item.get(
+                    "name", ""
+                ).casefold() == city.casefold()
+                and item.get(
+                    "admin1", ""
+                ).casefold()
+                == US_STATES[region].casefold()
+                and item.get(
+                    "country_code"
+                ) == "US"
+            )
+        ]
+
+        if not matches:
+            print(
+                f"[GEO] {location}: no verified match"
+            )
+            return None
+
+        result = matches[0]
+
+        coords = [
+            float(result["latitude"]),
+            float(result["longitude"]),
+        ]
+
+        cache[key] = coords
+
+        print(
+            f"[GEO] {location}: resolved"
+        )
+
+        return tuple(coords)
+
+    except (
+        requests.RequestException,
+        ValueError,
+        KeyError,
+        TypeError,
+    ) as exc:
+        print(
+            f"[GEO] {location}: "
+            f"lookup failed ({type(exc).__name__})"
+        )
+
+        return None
+
+
+# ============================================================
+# DISTANCE
 # ============================================================
 
 def distance(lat, lon):
@@ -240,88 +545,32 @@ def distance(lat, lon):
     )
 
     return (
-        3958.7613
-        * 2
-        * math.atan2(math.sqrt(x), math.sqrt(1 - x))
+        3958.7613 * 2
+        * math.atan2(
+            math.sqrt(x),
+            math.sqrt(1 - x),
+        )
     )
 
 
 # ============================================================
-# DATE AND LOCATION HELPERS
+# EVENT DETAIL EXTRACTION
 # ============================================================
-
-def parse_day(value):
-    try:
-        return dtparser.parse(
-            value,
-            fuzzy=True,
-            default=datetime(TODAY.year, 1, 1),
-        ).date()
-    except (ValueError, TypeError, OverflowError):
-        return None
-
-
-def find_date(text):
-    match = DATE_REGEX.search(text)
-
-    if not match:
-        return None
-
-    snippet = match.group(0)
-
-    if not re.search(r"20\d{2}", snippet):
-        nearby = text[match.start():match.start() + 110]
-        year = re.search(r"20\d{2}", nearby)
-
-        if not year:
-            return None
-
-        snippet += ", " + year.group(0)
-
-    dt = parse_day(snippet)
-
-    return dt.isoformat() if dt else None
-
-
-def location_from(text):
-    for full, abbreviation in STATE_NAMES.items():
-        text = re.sub(
-            r",\s*" + re.escape(full) + r"\b",
-            ", " + abbreviation,
-            text,
-            flags=re.I,
-        )
-
-    lower = text.lower()
-
-    matches = [
-        (lower.rfind(city), city)
-        for city in CITIES
-        if city in lower
-    ]
-
-    if matches:
-        city = max(matches)[1]
-        name, state = city.rsplit(", ", 1)
-        return f"{name.title()}, {state.upper()}"
-
-    match = LOCATION_REGEX.search(text)
-
-    if match:
-        return match.group(0)
-
-    return ""
-
 
 def details_from(text):
-    classes = list(
-        dict.fromkeys(
-            match.group(0)
-            for match in WEIGHTS_REGEX.finditer(text)
-        )
-    )
+    classes = []
 
-    registration_match = REG_REGEX.search(text)
+    for match in WEIGHTS_REGEX.finditer(text):
+        item = match.group(0).strip()
+
+        if item.casefold() not in [
+            x.casefold() for x in classes
+        ]:
+            classes.append(item)
+
+    registration_match = REG_REGEX.search(
+        text
+    )
 
     registration = (
         registration_match.group(0).strip()
@@ -330,168 +579,47 @@ def details_from(text):
     )
 
     return (
-        ", ".join(classes[:8]) if classes else "Not specified",
+        ", ".join(classes[:8])
+        if classes
+        else "Not specified",
         registration,
     )
 
 
 # ============================================================
-# BUILDERSDB PARSER
+# WEBSITE REQUESTS
 # ============================================================
 
-def parse_buildersdb(html):
-    soup = BeautifulSoup(html, "html.parser")
-    result = []
+def fetch(session, url):
+    response = session.get(
+        url,
+        timeout=25,
+    )
 
-    for link in soup.select("a[href]"):
-        text = link.get_text(" ", strip=True)
+    response.raise_for_status()
 
-        if (
-            len(text) < 25
-            or len(text) > 800
-            or "Registration:" not in text
-        ):
-            continue
-
-        day = find_date(text)
-        location = location_from(text)
-
-        if not day or not location:
-            continue
-
-        location_start = text.lower().find(
-            location.lower()
-        )
-
-        title = (
-            text[:location_start].strip(" -")
-            if location_start > 0
-            else text[:75]
-        )
-
-        if not title:
-            continue
-
-        classes, registration = details_from(text)
-
-        result.append(
-            Event(
-                title=title,
-                date=day,
-                location=location,
-                url=urljoin(
-                    "https://www.buildersdb.com",
-                    link.get("href", ""),
-                ),
-                source="BuildersDB",
-                classes=classes,
-                registration=registration,
-            )
-        )
-
-    return result
+    return response.text
 
 
 # ============================================================
-# STRUCTURED EVENT DATA PARSER
-# ============================================================
-
-def parse_jsonld_events(soup, source, major=False):
-    result = []
-
-    def explore(value):
-        if isinstance(value, list):
-            for item in value:
-                explore(item)
-
-        elif isinstance(value, dict):
-            typ = value.get("@type", "")
-
-            is_event = (
-                typ == "Event"
-                or (
-                    isinstance(typ, list)
-                    and "Event" in typ
-                )
-            )
-
-            if is_event:
-                title = value.get("name", "")
-                start = value.get("startDate", "")
-
-                dt = parse_day(start)
-                location = value.get("location") or {}
-
-                if isinstance(location, dict):
-                    address = location.get("address") or {}
-
-                    if isinstance(address, dict):
-                        location = ", ".join(
-                            str(x)
-                            for x in [
-                                address.get("addressLocality", ""),
-                                address.get("addressRegion", ""),
-                            ]
-                            if x
-                        )
-                    else:
-                        location = str(
-                            address or location.get("name", "")
-                        )
-
-                if title and dt and location:
-                    classes, registration = details_from(
-                        json.dumps(value)
-                    )
-
-                    result.append(
-                        Event(
-                            title=str(title),
-                            date=dt.isoformat(),
-                            location=str(location),
-                            url=str(value.get("url", "")),
-                            source=source,
-                            classes=classes,
-                            registration=registration,
-                            major=major,
-                        )
-                    )
-
-            for item in value.values():
-                if isinstance(item, (list, dict)):
-                    explore(item)
-
-    for script in soup.find_all(
-        "script",
-        type="application/ld+json",
-    ):
-        try:
-            data = json.loads(
-                script.string or script.get_text()
-            )
-            explore(data)
-
-        except (TypeError, ValueError):
-            continue
-
-    return result
-
-
-# ============================================================
-# ROBOT COMBAT EVENTS PARSER - CORRECTED
+# ROBOT COMBAT EVENTS
 # ============================================================
 
 def parse_rce_card(text):
     """
-    Parse one Robot Combat Events listing independently.
+    Extract an event from one isolated listing.
 
-    A date and location must appear together inside the
-    same event listing. No borrowing data from other cards.
+    Do not search shared containers containing unrelated
+    competitions. This prevents mixing locations and dates.
     """
 
-    text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(
+        r"\s+",
+        " ",
+        text,
+    ).strip()
 
-    date_match = re.search(
+    match = re.search(
         rf"\b({MONTH})\s+(\d{{1,2}})"
         rf"(?:\s*[–-]\s*(?:{MONTH}\s+)?\d{{1,2}})?"
         rf",?\s+(20\d{{2}})\b",
@@ -499,50 +627,53 @@ def parse_rce_card(text):
         re.I,
     )
 
-    if not date_match:
+    if not match:
         return None
 
-    title = text[:date_match.start()].strip(" -–|")
+    title = text[
+        :match.start()
+    ].strip(" -–|")
 
-    if not (3 <= len(title) <= 170):
+    if not 3 <= len(title) <= 170:
         return None
 
-    day = parse_day(
-        f"{date_match.group(1)} "
-        f"{date_match.group(2)}, "
-        f"{date_match.group(3)}"
+    date_text = (
+        f"{match.group(1)} "
+        f"{match.group(2)}, "
+        f"{match.group(3)}"
     )
+
+    day = parse_day(date_text)
 
     if not day:
         return None
 
-    tail = text[date_match.end():].strip()
+    tail = text[
+        match.end():
+    ].strip()
 
-    # Location must follow the event date.
-    # This prevents unrelated dates and cities being mixed.
-
-    location_match = re.match(
-        r"(?P<city>[A-Za-z][A-Za-z .'-]{1,65}),"
-        r"\s*(?P<state>[A-Z]{2})"
-        r"(?:,\s*United States)?(?=\s|$)",
-        tail,
+    # Match the city/state directly after the event date.
+    location_match = LOCATION_REGEX.match(
+        tail
     )
 
     if not location_match:
         return None
 
-    location = (
-        f"{location_match.group('city').strip()}, "
-        f"{location_match.group('state')}"
+    location = normalize_location(
+        location_match.group(0)
     )
 
-    # Reject cities we cannot accurately locate.
-    if location.lower() not in CITIES:
+    if not location:
         return None
 
-    own_details = tail[location_match.end():]
+    details = tail[
+        location_match.end():
+    ]
 
-    classes, registration = details_from(own_details)
+    classes, registration = details_from(
+        details
+    )
 
     return (
         title,
@@ -553,21 +684,133 @@ def parse_rce_card(text):
     )
 
 
+def parse_jsonld_events(soup, source, major=False):
+    events = []
+
+    def explore(value):
+        if isinstance(value, list):
+            for item in value:
+                explore(item)
+            return
+
+        if not isinstance(value, dict):
+            return
+
+        typ = value.get("@type", "")
+
+        is_event = (
+            typ == "Event"
+            or (
+                isinstance(typ, list)
+                and "Event" in typ
+            )
+        )
+
+        if is_event:
+            title = value.get("name", "")
+            day = parse_day(
+                value.get("startDate", "")
+            )
+
+            loc = value.get(
+                "location",
+                {},
+            )
+
+            if isinstance(loc, dict):
+                address = loc.get(
+                    "address",
+                    {},
+                )
+
+                if isinstance(address, dict):
+                    loc = ", ".join(
+                        str(x)
+                        for x in [
+                            address.get(
+                                "addressLocality", ""
+                            ),
+                            address.get(
+                                "addressRegion", ""
+                            ),
+                        ]
+                        if x
+                    )
+                else:
+                    loc = str(
+                        address or loc.get("name", "")
+                    )
+
+            location = normalize_location(
+                str(loc)
+            )
+
+            if title and day and location:
+                classes, registration = details_from(
+                    json.dumps(value)
+                )
+
+                events.append(
+                    Event(
+                        title=str(title),
+                        date=day.isoformat(),
+                        location=location,
+                        url=str(
+                            value.get("url", "")
+                        ),
+                        source=source,
+                        classes=classes,
+                        registration=registration,
+                        major=major,
+                    )
+                )
+
+        for item in value.values():
+            if isinstance(item, (list, dict)):
+                explore(item)
+
+    for script in soup.find_all(
+        "script",
+        type="application/ld+json",
+    ):
+        try:
+            data = json.loads(
+                script.string
+                or script.get_text()
+            )
+            explore(data)
+
+        except (
+            TypeError,
+            ValueError,
+        ):
+            continue
+
+    return events
+
+
 def parse_rce(html, base):
-    """
-    Extract individually validated events.
+    soup = BeautifulSoup(
+        html,
+        "html.parser",
+    )
 
-    Never use a shared HTML container containing multiple
-    competitions to determine an event's date or location.
-    """
+    found = parse_jsonld_events(
+        soup,
+        "Robot Combat Events",
+    )
 
-    soup = BeautifulSoup(html, "html.parser")
-
-    found = []
-    used = set()
+    seen = {
+        event.url.rstrip("/")
+        for event in found
+        if event.url
+    }
 
     for link in soup.select("a[href]"):
-        href = link.get("href", "")
+        href = link.get(
+            "href",
+            "",
+        )
 
         if not re.search(
             r"/events/\d+(?:/|\?|$)",
@@ -575,54 +818,59 @@ def parse_rce(html, base):
         ):
             continue
 
-        url = urljoin(base, href)
+        url = urljoin(
+            base,
+            href,
+        )
 
-        if url.rstrip("/") in used:
+        if url.rstrip("/") in seen:
             continue
 
-        # First try parsing the link's own text.
-        card_text = link.get_text(" ", strip=True)
-        record = parse_rce_card(card_text)
+        record = parse_rce_card(
+            link.get_text(
+                " ",
+                strip=True,
+            )
+        )
 
         if record is None:
             ancestor = link.parent
 
-            # Only inspect the smallest parent containers.
-            # A parent must contain exactly one event link.
             for _ in range(4):
                 if ancestor is None:
                     break
 
-                event_links = [
+                related = [
                     a
-                    for a in ancestor.select("a[href]")
+                    for a in ancestor.select(
+                        "a[href]"
+                    )
                     if re.search(
                         r"/events/\d+(?:/|\?|$)",
                         a.get("href", ""),
                     )
                 ]
 
-                if len(event_links) != 1:
+                # Do not read a shared container.
+                if len(related) != 1:
                     break
 
-                candidate_text = ancestor.get_text(
+                text = ancestor.get_text(
                     " ",
                     strip=True,
                 )
 
-                if len(candidate_text) > 650:
+                if len(text) > 650:
                     break
 
-                # A shared container with multiple dates
-                # is unsafe to use as an individual card.
                 if len(
-                    DATE_REGEX.findall(candidate_text)
+                    DATE_REGEX.findall(text)
                 ) == 1:
                     record = parse_rce_card(
-                        candidate_text
+                        text
                     )
 
-                    if record is not None:
+                    if record:
                         break
 
                 ancestor = ancestor.parent
@@ -650,14 +898,12 @@ def parse_rce(html, base):
             )
         )
 
-        used.add(url.rstrip("/"))
+        seen.add(
+            url.rstrip("/")
+        )
 
     return found
 
-
-# ============================================================
-# ROBOT COMBAT EVENTS SOURCE HANDLING
-# ============================================================
 
 def get_rce_events(session):
     urls = [
@@ -669,12 +915,19 @@ def get_rce_events(session):
 
     for url in urls:
         try:
-            html = fetch(session, url)
-            events = parse_rce(html, url)
+            html = fetch(
+                session,
+                url,
+            )
+
+            events = parse_rce(
+                html,
+                url,
+            )
 
             diagnostics.append(
-                f"{url}: HTTP 200; extracted "
-                f"{len(events)} events"
+                f"{url}: HTTP 200; "
+                f"extracted {len(events)} events"
             )
 
             if events:
@@ -704,33 +957,110 @@ def get_rce_events(session):
         except Exception as exc:
             diagnostics.append(
                 f"{url}: parser error "
-                f"({type(exc).__name__}: "
-                f"{str(exc)[:90]})"
+                f"({type(exc).__name__})"
             )
 
     blocked = (
         diagnostics
         and all(
-            "HTTP 403" in x or "HTTP 429" in x
-            for x in diagnostics
+            "HTTP 403" in item
+            or "HTTP 429" in item
+            for item in diagnostics
         )
     )
 
-    status = (
+    return (
+        [],
         "blocked/unavailable"
         if blocked
-        else "zero detected"
+        else "zero detected",
+        "; ".join(diagnostics),
     )
-
-    return [], status, "; ".join(diagnostics)
 
 
 # ============================================================
-# NHRL PARSER
+# BUILDERSDB
+# ============================================================
+
+def parse_buildersdb(html):
+    soup = BeautifulSoup(
+        html,
+        "html.parser",
+    )
+
+    result = []
+
+    for link in soup.select(
+        "a[href]"
+    ):
+        text = link.get_text(
+            " ",
+            strip=True,
+        )
+
+        if (
+            len(text) < 25
+            or len(text) > 800
+            or "Registration:" not in text
+        ):
+            continue
+
+        day = find_date(text)
+
+        # Match the event city independently.
+        location = location_from(text)
+
+        if not day or not location:
+            continue
+
+        title = text
+
+        # Strip trailing metadata when present.
+        match = re.search(
+            rf"\b{MONTH}\s+\d{{1,2}}",
+            title,
+            re.I,
+        )
+
+        if match:
+            title = title[
+                :match.start()
+            ].strip(" -–|")
+
+        if not title:
+            title = text[:75]
+
+        classes, registration = details_from(
+            text
+        )
+
+        result.append(
+            Event(
+                title=title,
+                date=day,
+                location=location,
+                url=urljoin(
+                    "https://www.buildersdb.com",
+                    link.get("href", ""),
+                ),
+                source="BuildersDB",
+                classes=classes,
+                registration=registration,
+            )
+        )
+
+    return result
+
+
+# ============================================================
+# NHRL
 # ============================================================
 
 def parse_nhrl(html, base):
-    soup = BeautifulSoup(html, "html.parser")
+    soup = BeautifulSoup(
+        html,
+        "html.parser",
+    )
 
     result = parse_jsonld_events(
         soup,
@@ -760,16 +1090,17 @@ def parse_nhrl(html, base):
         if not parent:
             continue
 
-        if parent.parent:
-            text = parent.parent.get_text(
+        text = (
+            parent.parent.get_text(
                 " ",
                 strip=True,
             )[:700]
-        else:
-            text = parent.get_text(
+            if parent.parent
+            else parent.get_text(
                 " ",
                 strip=True,
             )
+        )
 
         day = find_date(text)
 
@@ -798,11 +1129,14 @@ def parse_nhrl(html, base):
 
 
 # ============================================================
-# ROBOT RUCKUS PARSER
+# ROBOT RUCKUS
 # ============================================================
 
 def parse_ruckus(html, base):
-    soup = BeautifulSoup(html, "html.parser")
+    soup = BeautifulSoup(
+        html,
+        "html.parser",
+    )
 
     result = parse_jsonld_events(
         soup,
@@ -824,18 +1158,19 @@ def parse_ruckus(html, base):
     )
 
     if match:
-        date_text = (
+        day = parse_day(
             f"{match.group(1)} "
             f"{match.group(2)}, "
             f"{match.group(3)}"
         )
 
-        day = parse_day(date_text)
-
         if day:
             result.append(
                 Event(
-                    title="Robot Ruckus " + match.group(3),
+                    title=(
+                        "Robot Ruckus "
+                        + match.group(3)
+                    ),
                     date=day.isoformat(),
                     location="Orlando, FL",
                     url=base,
@@ -854,50 +1189,218 @@ def parse_ruckus(html, base):
 # ============================================================
 
 def load_curated():
-    path = Path("curated_events.json")
-
-    if not path.exists():
+    if not CURATED_PATH.exists():
         return []
 
     try:
         data = json.loads(
-            path.read_text(encoding="utf8")
+            CURATED_PATH.read_text(
+                encoding="utf8"
+            )
         )
 
         return [
             Event(
-                title=str(e["title"]),
-                date=str(e["date"]),
-                location=str(e["location"]),
-                url=str(e["url"]),
+                title=str(
+                    item["title"]
+                ),
+                date=str(
+                    item["date"]
+                ),
+                location=str(
+                    item["location"]
+                ),
+                url=str(
+                    item["url"]
+                ),
                 source="Curated",
                 classes=str(
-                    e.get(
+                    item.get(
                         "classes",
                         "Not specified",
                     )
                 ),
                 registration=str(
-                    e.get(
+                    item.get(
                         "registration",
                         "Check event page",
                     )
                 ),
                 major=bool(
-                    e.get("major", False)
+                    item.get(
+                        "major",
+                        False,
+                    )
                 ),
             )
-            for e in data
+            for item in data
         ]
 
-    except (ValueError, TypeError, KeyError) as exc:
+    except (
+        ValueError,
+        TypeError,
+        KeyError,
+    ) as exc:
         raise RuntimeError(
             f"Invalid curated_events.json: {exc}"
         ) from exc
 
 
 # ============================================================
-# EVENT HISTORY
+# DUPLICATE EVENT DETECTION
+# ============================================================
+
+def normalized_title(event):
+    text = event.title.casefold()
+
+    location = normalize_location(
+        event.location
+    )
+
+    if location:
+        city, state = location.rsplit(
+            ", ",
+            1,
+        )
+
+        state_name = US_STATES[state]
+
+        # Remove repeated location text from titles.
+        for suffix in [
+            f"{city}, {state}",
+            f"{city}, {state_name}",
+            f"{city}, {state}, united states",
+            f"{city}, {state_name}, united states",
+        ]:
+            if text.endswith(suffix.casefold()):
+                text = text[
+                    :-len(suffix)
+                ].strip(" -–|,")
+
+    # Remove common non-title metadata if embedded
+    # in an event name.
+    text = re.sub(
+        r"\bregistration\s+"
+        r"(?:open|closed|opens).*",
+        "",
+        text,
+        flags=re.I,
+    )
+
+    # Remove a full trailing event date.
+    text = re.sub(
+        rf"\b{MONTH}\s+\d{{1,2}},?\s+20\d{{2}}$",
+        "",
+        text,
+        flags=re.I,
+    )
+
+    text = re.sub(
+        r"[^a-z0-9]+",
+        " ",
+        text,
+    ).strip()
+
+    return text
+
+
+def same_competition(a, b):
+    if a.date != b.date:
+        return False
+
+    loc_a = normalize_location(
+        a.location
+    )
+
+    loc_b = normalize_location(
+        b.location
+    )
+
+    if loc_a != loc_b:
+        return False
+
+    title_a = normalized_title(a)
+    title_b = normalized_title(b)
+
+    if not title_a or not title_b:
+        return False
+
+    if title_a == title_b:
+        return True
+
+    similarity = SequenceMatcher(
+        None,
+        title_a,
+        title_b,
+    ).ratio()
+
+    return similarity >= 0.88
+
+
+def deduplicate(events):
+    unique = []
+    duplicates = 0
+
+    for event in events:
+        counterpart = next(
+            (
+                previous
+                for previous in unique
+                if same_competition(
+                    previous,
+                    event,
+                )
+            ),
+            None,
+        )
+
+        if counterpart is None:
+            event._aliases = {
+                event.event_id
+            }
+
+            unique.append(event)
+            continue
+
+        duplicates += 1
+
+        aliases = (
+            counterpart._aliases
+            | {event.event_id}
+        )
+
+        old_priority = SOURCE_PRIORITY.get(
+            counterpart.source,
+            0,
+        )
+
+        new_priority = SOURCE_PRIORITY.get(
+            event.source,
+            0,
+        )
+
+        if new_priority > old_priority:
+            event._aliases = aliases
+
+            index = unique.index(
+                counterpart
+            )
+
+            unique[index] = event
+
+        else:
+            counterpart._aliases = aliases
+
+    print(
+        f"[DEDUP] Removed {duplicates} "
+        f"duplicate event records"
+    )
+
+    return unique
+
+
+# ============================================================
+# STATE MANAGEMENT
 # ============================================================
 
 def load_state():
@@ -913,6 +1416,21 @@ def load_state():
             {},
         )
 
+        state.setdefault(
+            "geocode_cache",
+            {},
+        )
+
+        state.setdefault(
+            "last_summary",
+            "",
+        )
+
+        state.setdefault(
+            "last_warning",
+            "",
+        )
+
         return state
 
     old_ids = []
@@ -926,24 +1444,25 @@ def load_state():
 
     return {
         "announced": {
-            str(x): {
+            str(item): {
                 "registration": "",
             }
-            for x in old_ids
+            for item in old_ids
         },
+        "geocode_cache": {},
         "last_summary": "",
         "last_warning": "",
     }
 
 
 # ============================================================
-# DISCORD WEBHOOK
+# DISCORD
 # ============================================================
 
 def send(payload):
     if not WEBHOOK:
         raise RuntimeError(
-            "DISCORD_WEBHOOK_URL GitHub secret is missing"
+            "DISCORD_WEBHOOK_URL secret is missing"
         )
 
     response = requests.post(
@@ -959,21 +1478,19 @@ def embed(event, update=False):
     if event.distance_miles is not None:
         distance_text = (
             f"{event.distance_miles:.0f} miles "
-            f"straight-line from ERAU"
+            "straight-line from ERAU"
         )
     else:
         distance_text = "Unknown"
 
-    title_prefix = (
+    title = (
         "Event updated: "
         if update
         else "New event: "
-    )
+    ) + event.title
 
     return {
-        "title": (
-            title_prefix + event.title
-        )[:256],
+        "title": title[:256],
         "url": event.url or None,
         "color": (
             0xF2AA4C
@@ -988,7 +1505,7 @@ def embed(event, update=False):
             },
             {
                 "name": "Location",
-                "value": event.location[:100],
+                "value": event.location,
                 "inline": True,
             },
             {
@@ -1022,25 +1539,10 @@ def embed(event, update=False):
 
 
 # ============================================================
-# WEBSITE REQUESTS
+# COLLECT EVENTS
 # ============================================================
 
-def fetch(session, url):
-    response = session.get(
-        url,
-        timeout=25,
-    )
-
-    response.raise_for_status()
-
-    return response.text
-
-
-# ============================================================
-# COLLECT AND FILTER EVENTS
-# ============================================================
-
-def collect():
+def collect(state):
     session = requests.Session()
 
     session.headers["User-Agent"] = (
@@ -1053,9 +1555,8 @@ def collect():
     raw = []
 
     for name, url, kind, major in SOURCES:
-
         if kind == "rce":
-            found, status, diagnostic = get_rce_events(
+            found, status, detail = get_rce_events(
                 session
             )
 
@@ -1064,17 +1565,16 @@ def collect():
                 "url": url,
                 "parsed": len(found),
                 "status": status,
-                "detail": diagnostic,
+                "detail": detail,
             })
 
             print(
-                f"[SOURCE] {name}: "
-                f"{len(found)} events extracted "
-                f"({status})"
+                f"[SOURCE] {name}: {len(found)} "
+                f"events extracted ({status})"
             )
 
             print(
-                f"[SOURCE DETAIL] {diagnostic}"
+                f"[SOURCE DETAIL] {detail}"
             )
 
             raw.extend(found)
@@ -1087,9 +1587,17 @@ def collect():
             )
 
             parsers = {
-                "buildersdb": lambda: parse_buildersdb(html),
-                "nhrl": lambda: parse_nhrl(html, url),
-                "ruckus": lambda: parse_ruckus(html, url),
+                "buildersdb": lambda: parse_buildersdb(
+                    html
+                ),
+                "nhrl": lambda: parse_nhrl(
+                    html,
+                    url,
+                ),
+                "ruckus": lambda: parse_ruckus(
+                    html,
+                    url,
+                ),
             }
 
             found = parsers[kind]()
@@ -1140,31 +1648,45 @@ def collect():
         "out_of_radius": 0,
     }
 
-    unique = {}
+    eligible = []
 
     for event in raw:
-        dt = parse_day(event.date)
+        day = parse_day(
+            event.date
+        )
 
-        if not dt:
+        if not day:
             skipped["unknown_date"] += 1
             continue
 
-        if dt < TODAY:
+        if day < TODAY:
             skipped["old"] += 1
             continue
 
-        event.date = dt.isoformat()
+        event.date = day.isoformat()
 
-        location = event.location.lower().strip()
+        location = normalize_location(
+            event.location
+        )
 
-        coordinates = CITIES.get(location)
+        if location is None:
+            skipped["unknown_location"] += 1
+            continue
 
-        if coordinates is None:
+        event.location = location
+
+        coords = coordinates_for(
+            location,
+            state,
+            session,
+        )
+
+        if coords is None:
             skipped["unknown_location"] += 1
             continue
 
         event.distance_miles = round(
-            distance(*coordinates),
+            distance(*coords),
             1,
         )
 
@@ -1178,72 +1700,79 @@ def collect():
             skipped["out_of_radius"] += 1
             continue
 
-        # Deduplicate equivalent records from different
-        # sources while preferring automatically detected
-        # records over curated fallback records.
+        eligible.append(event)
 
-        fingerprint = (
-            re.sub(
-                r"[^a-z0-9]+",
-                "",
-                event.title.lower(),
-            ),
+    unique = deduplicate(
+        eligible
+    )
+
+    unique.sort(
+        key=lambda event: (
             event.date,
-            event.location.lower(),
+            event.distance_miles,
+            event.title,
         )
-
-        if (
-            fingerprint not in unique
-            or (
-                unique[fingerprint].source == "Curated"
-                and event.source != "Curated"
-            )
-        ):
-            unique[fingerprint] = event
-
-    result = sorted(
-        unique.values(),
-        key=lambda e: (
-            e.date,
-            e.distance_miles,
-            e.title,
-        ),
     )
 
     print(
         f"[FILTER] {len(raw)} extracted total; "
-        f"{len(result)} eligible; "
+        f"{len(unique)} eligible; "
         f"skipped={skipped}"
     )
 
-    return result, sources, skipped
+    return unique, sources, skipped
 
 
 # ============================================================
-# MAIN PROGRAM
+# MAIN
 # ============================================================
 
 def main():
-    events, sources, skipped = collect()
-
     state = load_state()
+
+    events, sources, skipped = collect(
+        state
+    )
+
+    # Don't store temporary request counters.
+    state.pop(
+        "_geocode_attempted",
+        None,
+    )
+
     announced = state["announced"]
+
+    known = {}
+
+    for event in events:
+        previous = next(
+            (
+                announced[alias]
+                for alias in sorted(
+                    event._aliases
+                )
+                if alias in announced
+            ),
+            None,
+        )
+
+        known[event.event_id] = previous
 
     new_events = [
         event
         for event in events
-        if event.event_id not in announced
+        if known[event.event_id] is None
     ]
 
     updated_events = [
         event
         for event in events
         if (
-            event.event_id in announced
-            and announced[event.event_id].get(
+            known[event.event_id] is not None
+            and known[event.event_id].get(
                 "registration", ""
             )
-            and announced[event.event_id]["registration"]
+            and known[event.event_id]["registration"]
             != event.registration
         )
     ]
@@ -1262,48 +1791,71 @@ def main():
             f"{event.source}"
         )
 
-    # Limit event notifications per run.
-    # Only mark an event announced after delivery succeeds.
-
     notifications = 0
 
+    # New event and registration change notifications.
     for event in (
         new_events + updated_events
-    )[:10]:
+    )[:MAX_NOTIFICATIONS]:
 
         is_update = event in updated_events
 
-        message = (
+        content = (
             "Registration information changed"
             if is_update
             else "New nearby combat robotics event"
         )
 
-        content = (
-            (ROLE_MENTION + "\n" if ROLE_MENTION else "")
-            + message
-        )
+        if ROLE_MENTION:
+            content = (
+                ROLE_MENTION
+                + "\n"
+                + content
+            )
 
-        payload = {
+        send({
             "username": "Combat Event Tracker",
             "content": content,
             "embeds": [
-                embed(event, is_update)
+                embed(
+                    event,
+                    is_update,
+                )
             ],
-        }
+        })
 
-        send(payload)
-
-        announced[event.event_id] = {
-            "registration": event.registration,
-            "date": event.date,
-        }
+        # Mark all equivalent IDs announced only after
+        # Discord confirms delivery.
+        for alias in event._aliases:
+            announced[alias] = {
+                "registration": event.registration,
+                "date": event.date,
+            }
 
         notifications += 1
 
-    # Weekly summary every Monday.
+    # Save equivalent source IDs for events that were
+    # already announced, without reposting them.
+    for event in events:
+        if (
+            event in new_events
+            or event in updated_events
+        ):
+            continue
+
+        previous = known[
+            event.event_id
+        ]
+
+        if previous is not None:
+            for alias in event._aliases:
+                announced[alias] = previous
 
     local_date = TODAY.isoformat()
+
+    # ========================================================
+    # WEEKLY SUMMARY
+    # ========================================================
 
     should_summarize = (
         TODAY.weekday() == 0
@@ -1312,36 +1864,41 @@ def main():
 
     if (
         should_summarize
-        and state.get("last_summary") != local_date
+        and state.get(
+            "last_summary"
+        ) != local_date
     ):
         summary = sorted(
             events,
-            key=lambda e: (
-                e.date,
-                e.distance_miles,
+            key=lambda event: (
+                event.date,
+                event.distance_miles,
             ),
         )[:10]
 
         if summary:
             lines = [
                 (
-                    f"**{e.date}** • {e.title} • "
-                    f"{e.location} "
-                    f"({e.distance_miles:.0f} mi straight-line)"
+                    f"**{event.date}** | "
+                    f"{event.title} | "
+                    f"{event.location} | "
+                    f"{event.distance_miles:.0f} "
+                    "mi straight-line"
                 )
-                for e in summary
+                for event in summary
             ]
 
             message = (
-                "**Upcoming combat robotics events near ERAU**\n"
+                "**Upcoming Combat Robotics Events "
+                "Near ERAU**\n"
                 + "\n".join(lines)
             )
 
         else:
             message = (
-                "**Weekly combat robotics summary:** "
+                "**Weekly Combat Robotics Summary:** "
                 "No upcoming eligible events found. "
-                "Check source health in GitHub Actions."
+                "Check source_status.json."
             )
 
         send({
@@ -1351,7 +1908,9 @@ def main():
 
         state["last_summary"] = local_date
 
-    # Send a source warning no more than once per week.
+    # ========================================================
+    # SOURCE WARNINGS
+    # ========================================================
 
     problems = [
         source
@@ -1363,25 +1922,27 @@ def main():
             )
             or (
                 source["status"] == "zero detected"
-                and source["name"].startswith(
-                    (
-                        "Robot Combat Events",
-                        "BuildersDB",
-                    )
+                and source["name"] in (
+                    "Robot Combat Events",
+                    "BuildersDB",
                 )
             )
         )
     ]
 
     last_warning = parse_day(
-        state.get("last_warning", "")
+        state.get(
+            "last_warning",
+            "",
+        )
     )
 
     if problems and (
         not last_warning
-        or TODAY - last_warning >= timedelta(days=7)
+        or TODAY - last_warning
+        >= timedelta(days=7)
     ):
-        message = (
+        warning = (
             "**Event tracker source warning:** "
             + ", ".join(
                 source["name"]
@@ -1394,7 +1955,7 @@ def main():
 
         send({
             "username": "Combat Event Tracker",
-            "content": message[:1900],
+            "content": warning[:1900],
         })
 
         state["last_warning"] = local_date
@@ -1411,7 +1972,9 @@ def main():
             ),
         })
 
-    # Save event history and source diagnostics.
+    # ========================================================
+    # SAVE STATE
+    # ========================================================
 
     state["announced"] = announced
 
@@ -1428,7 +1991,9 @@ def main():
         json.dumps(
             [
                 asdict(event)
-                | {"event_id": event.event_id}
+                | {
+                    "event_id": event.event_id
+                }
                 for event in events
             ],
             indent=2,
@@ -1446,10 +2011,21 @@ def main():
                 "skipped": skipped,
                 "eligible": len(events),
                 "notifications": notifications,
+                "geocode_cache_size": len(
+                    state.get(
+                        "geocode_cache",
+                        {},
+                    )
+                ),
             },
             indent=2,
         ) + "\n",
         encoding="utf8",
+    )
+
+    print(
+        f"[COMPLETE] {len(events)} unique events; "
+        f"{notifications} notifications sent"
     )
 
 
