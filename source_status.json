@@ -1,5 +1,5 @@
 {
-  "checked_at": "2026-11-14T00:16:49.449483+00:00",
+  "checked_at": "2026-11-14T00:53:54.685966+00:00",
   "sources": [
     {
       "name": "Robot Combat Events",
@@ -34,5 +34,5 @@
     "out_of_radius": 2
   },
   "eligible": 7,
-  "notifications": 1
+  "notifications": 0
 }
