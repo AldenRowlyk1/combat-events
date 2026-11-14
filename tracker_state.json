@@ -93,6 +93,56 @@
       "registration": ""
     }
   },
+  "geocode_cache": {
+    "anaheim, ca": [
+      33.83529,
+      -117.9145
+    ],
+    "cambridge, ma": [
+      42.3751,
+      -71.10561
+    ],
+    "chester, pa": [
+      39.84753,
+      -75.35785
+    ],
+    "corvallis, or": [
+      44.56457,
+      -123.26204
+    ],
+    "fitchburg, ma": [
+      42.58342,
+      -71.8023
+    ],
+    "houston, tx": [
+      29.76328,
+      -95.36327
+    ],
+    "monument, co": [
+      39.09166,
+      -104.87276
+    ],
+    "pleasant grove, ut": [
+      40.36412,
+      -111.73854
+    ],
+    "redmond, wa": [
+      47.67399,
+      -122.12151
+    ],
+    "rocklin, ca": [
+      38.79073,
+      -121.23578
+    ],
+    "san francisco, ca": [
+      37.77493,
+      -122.41942
+    ],
+    "west lafayette, in": [
+      40.42587,
+      -86.90807
+    ]
+  },
   "last_summary": "",
   "last_warning": "2026-11-13"
 }
