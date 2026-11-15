@@ -73,7 +73,7 @@
     },
     "b5ebda947c8014e3": {
       "date": "2026-11-15",
-      "registration": "Registration open"
+      "registration": "Registration closed"
     },
     "cfe16ee18c1f5ceb": {
       "registration": ""
@@ -130,6 +130,10 @@
       39.09166,
       -104.87276
     ],
+    "new london, ct": [
+      41.35565,
+      -72.09952
+    ],
     "north richland hills, tx": [
       32.8343,
       -97.2289
@@ -150,9 +154,21 @@
       37.77493,
       -122.41942
     ],
+    "vestal, ny": [
+      42.08507,
+      -76.05381
+    ],
+    "walker, mi": [
+      43.00141,
+      -85.76809
+    ],
     "west lafayette, in": [
       40.42587,
       -86.90807
+    ],
+    "woodbury, mn": [
+      44.92386,
+      -92.95938
     ]
   },
   "last_summary": "",
