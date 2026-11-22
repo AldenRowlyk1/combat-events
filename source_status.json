@@ -1,12 +1,12 @@
 {
-  "checked_at": "2026-11-21T19:54:31.992827+00:00",
+  "checked_at": "2026-11-22T20:05:59.153834+00:00",
   "sources": [
     {
       "name": "Robot Combat Events",
       "url": "https://www.robotcombatevents.com/events/",
-      "parsed": 14,
+      "parsed": 12,
       "status": "ok",
-      "detail": "HTTP 200; 14 parsed from https://www.robotcombatevents.com/events/"
+      "detail": "HTTP 200; 12 parsed from https://www.robotcombatevents.com/events/"
     },
     {
       "name": "BuildersDB",
@@ -35,9 +35,9 @@
     "bad_date": 0,
     "bad_location": 0,
     "unresolved_location": 0,
-    "out_of_radius": 16
+    "out_of_radius": 14
   },
   "eligible": 5,
   "notifications": 0,
-  "geocoded_cities": 20
+  "geocoded_cities": 28
 }
