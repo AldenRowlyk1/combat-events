@@ -1,5 +1,5 @@
 {
-  "checked_at": "2026-11-24T00:32:48.414150+00:00",
+  "checked_at": "2026-11-24T22:53:00.575985+00:00",
   "sources": [
     {
       "name": "Robot Combat Events",
@@ -38,6 +38,6 @@
     "out_of_radius": 13
   },
   "eligible": 6,
-  "notifications": 1,
+  "notifications": 0,
   "geocoded_cities": 29
 }
