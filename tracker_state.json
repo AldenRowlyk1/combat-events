@@ -7,6 +7,10 @@
       "date": "2026-11-14",
       "registration": "Registration closed"
     },
+    "0af69d0fe89fd40c": {
+      "date": "2027-01-02",
+      "registration": "Check event page"
+    },
     "228629f611f6c30a": {
       "date": "2026-11-14",
       "registration": "Registration closed"
@@ -166,6 +170,10 @@
       40.36412,
       -111.73854
     ],
+    "portland, or": [
+      45.52345,
+      -122.67621
+    ],
     "provo, ut": [
       40.23384,
       -111.65853
@@ -207,6 +215,6 @@
       -92.95938
     ]
   },
-  "last_summary": "2026-11-16",
+  "last_summary": "2026-11-23",
   "last_warning": "2026-11-13"
 }
